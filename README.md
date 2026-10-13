@@ -25,7 +25,7 @@ Saving looked fine, but after a reload the save was gone. The loader restored sa
 The data set has no `update.rpf`, so the MP/NG menu assets (`MPShopSale.ytd`, the `COLOUR_SWITCHER` movies) are missing. The shop scripts wait for them forever. `patch_shop_menus.py` patches `game.wasm` so a missing texture dictionary or scaleform movie reports "loaded" instead of blocking the menu.
 
 ### Crash after playing for a while
-The streaming resource heap grew by 256 MB every time it filled up and never evicted anything. In a long session the game died while loading a map piece. (The wasm memory starts at 3 GB but can grow to 16 GB; `game.js` sets `maximum: 262144n` pages.) The patch caps that heap at 1.5 GB (6 x 256 MB), so the game unloads the least used models instead of growing. A side effect can be a little texture pop-in. Change `GROW_HEAP_LIMIT` in `patch_shop_menus.py` if you want a different cap. A 1 GB cap (4) was too small for Complications: the heap filled to 1018/1024 MB and missions stalled with streaming requests that could never be placed.
+The streaming resource heap grew by 256 MB every time it filled up and never evicted anything. In a long session the game died while loading a map piece. (The wasm memory starts at 3 GB but can grow to 16 GB; `game.js` sets `maximum: 262144n` pages.) The patch caps that heap, so the game unloads the least used models instead of growing. A side effect can be a little texture pop-in. The cap follows your RAM: 1.5 GB (6 x 256 MB) below 12 GB, 1.75 GB (7) otherwise. Each step costs the browser tab about 256 MB more. To choose it yourself, run `patch_shop_menus.py --heaps N`; 2 GB (8) is untested. A 1 GB cap (4) was too small for Complications: the heap filled to 1018/1024 MB and missions stalled with streaming requests that could never be placed. At 1.5 GB the Armenian1 chase filled it to 1529/1536 MB; one file could not be placed for a few seconds and the game hitched once for 0.4 s.
 
 ### Freeze when a TV movie stops
 This build has no Bink, so the `AsyncBink` thread never starts and no movie ever reports loaded. `CMovieMgr::Delete` (and six other inlined copies of `CMovie::WaitTillLoaded`) slept until it did, so the main thread hung in "Movie Manager" for good, for example when Michael's TV switches off in Complications. The patch makes those waits take their existing skip path. TV screens stay blank as before.
@@ -55,7 +55,7 @@ Press **`-`** (the key right of `0`) in game: the current character gets **+$999
    - Windows: `runtime\python.exe patch_shop_menus.py`
    - macOS / Linux: `python3 patch_shop_menus.py`
 
-   It should print `game.wasm patched: 63201802 -> 63202110 bytes, sha256 d059b41d...`. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
+   It should print `game.wasm patched: 63201802 -> 63202110 bytes` and the cache size it chose for your RAM. The sha256 is `d059b41d...` for 6 heaps, `854c92a1...` for 7 and `785c3d52...` for 8. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
 
    To undo: copy `game.wasm.orig` over `game.wasm` (in `mirror/playgta5.com/b/8b0b5899ed/`).
 

@@ -15,8 +15,9 @@ character's SPn_TOTAL_CASH, through the same calls a money pickup makes (CPickup
 
 Also a resource heap cap: sysMemGrowBuddyAllocator::GrowHeap adds a 256 MB heap whenever the free space is below 4 MB,
 up to 32 heaps, so the streaming cache never evicts and grows until the 3 GB wasm memory is gone (a session crashed
-with "Invalid fixup" at 1256/1280 MB). With at most GROW_HEAP_LIMIT heaps, GetMemoryAvailable reports the real free
+with "Invalid fixup" at 1256/1280 MB). With a heap limit, GetMemoryAvailable reports the real free
 space and strStreamingAllocator::MakeSpaceForAllocation deletes the least used objects instead.
+The limit follows the machine's RAM (heap_limit); --heaps N overrides it. 4 heaps (1 GB) stalled missions.
 
 Also a log flush fix: netLogImpl::Flush(true) loops until the log spool thread has written the pending buffer.
 CNetwork::Shutdown stops that thread on every session shutdown (in-game Load Game, the return after Replay Mission),
@@ -29,7 +30,7 @@ Reads b/8b0b5899ed/game.wasm.orig (the untouched backup) and writes b/8b0b5899ed
 On the first run game.wasm is the untouched file: it is checked and copied to game.wasm.orig first.
 Restore: cp game.wasm.orig game.wasm
 """
-import hashlib, shutil, struct, sys
+import argparse, hashlib, os, shutil, struct, sys
 from pathlib import Path
 
 DIR = Path(__file__).resolve().parent / 'mirror' / 'playgta5.com' / 'b' / '8b0b5899ed'
@@ -42,7 +43,6 @@ HAS_MOVIE_LOADED = (50789, 0x1dc92c4)        # graphics_commands::CommandHasScal
 HAS_MOVIE_LOADED_NATIVE = (51266, 0x1dd6879) # scrWrapped_HAS_SCALEFORM_MOVIE_LOADED::Call (inlines the command)
 STATS_UPDATE = (77092, 0x2647586)            # CStatsMgr::Update, once per game frame
 GROW_HEAP = (3036, 0x264d27)                 # rage::sysMemGrowBuddyAllocator::GrowHeap
-GROW_HEAP_LIMIT = 6                          # heaps of 256 MB: resource virtual stops at 1536 MB
 # Each has an inlined CMovieMgr::CMovie::WaitTillLoaded: unless flags97 & 1, sleep until bwMovie byte 171 (loaded) is set.
 # Only the AsyncBink thread sets it, and the wasm build never starts that thread (no Bink), so the main thread sleeps
 # forever once a TV movie is deleted (Michael's TV in Armenian 3). 'and' -> 'or' makes the skip test always true.
@@ -166,7 +166,28 @@ def check(ok, what):
         sys.exit(f'{what} does not match; not the expected game.wasm, nothing written')
 
 
-def patch(data):
+def ram_gb():
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [('length', ctypes.c_uint32), ('load', ctypes.c_uint32), ('total', ctypes.c_uint64),
+                            ('rest', ctypes.c_uint64 * 6)]
+            status = MemoryStatus(ctypes.sizeof(MemoryStatus))
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+            return status.total / 2**30 or None
+        return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 2**30
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def heap_limit(ram):
+    """Heaps of 256 MB for the streaming cache. 6 (1.5 GB) ran Armenian1 at 1529/1536 MB with one 0.4 s hitch.
+    8 is not played yet (the tab would reach about 3.9 GB), so it is only available through --heaps."""
+    return 6 if ram is not None and ram < 12 else 7
+
+
+def patch(data, heaps):
     i = 8
     while data[i] != 10:
         size, j = leb(data, i + 1)
@@ -210,10 +231,10 @@ def patch(data):
     check(stats[at:at + 9] == bytes.fromhex('230042407c22052400'), 'CStatsMgr::Update entry')
     stats[at:at] = cash_hotkey()
 
-    # GrowHeap entry: if (heapCount <= 31) grow; the constant becomes GROW_HEAP_LIMIT - 1 (same 1-byte LEB).
+    # GrowHeap entry: if (heapCount <= 31) grow; the constant becomes heaps - 1 (same 1-byte LEB).
     grow = body(GROW_HEAP); at = locals_end(grow)
     check(grow[at:at + 13] == bytes.fromhex('024020002802fc032210411f4d'), 'GrowHeap entry')
-    grow[at + 11] = GROW_HEAP_LIMIT - 1
+    grow[at + 11] = heaps - 1
 
     # First thing in each wait loop: if (spoolThreadId == -1) break out. In Flush, br_if 1 leaves the loop and its if.
     # In HandleBufferSwapFailure, br_if 3 leaves the wait, the swap retry loop and the block around them: the existing
@@ -238,12 +259,20 @@ def patch(data):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--heaps', type=int, help='streaming cache size in 256 MB heaps, 1-32 (default: from RAM, 6-7)')
+    ram = ram_gb()
+    heaps = parser.parse_args().heaps
+    heaps = heap_limit(ram) if heaps is None else heaps
+    if not 1 <= heaps <= 32:
+        parser.error('--heaps must be 1-32')
     orig = DIR / 'game.wasm.orig'
     if not orig.exists():
         check(hashlib.sha256((DIR / 'game.wasm').read_bytes()).hexdigest() == ORIG_SHA256, 'game.wasm sha256')
         shutil.copy2(DIR / 'game.wasm', orig)
     source = orig.read_bytes()
     check(hashlib.sha256(source).hexdigest() == ORIG_SHA256, 'game.wasm.orig sha256')
-    patched = patch(source)
+    patched = patch(source, heaps)
     (DIR / 'game.wasm').write_bytes(patched)
     print(f'game.wasm patched: {len(source)} -> {len(patched)} bytes, sha256 {hashlib.sha256(patched).hexdigest()}')
+    print(f'streaming cache: {heaps * 256} MB ({heaps} x 256 MB, RAM {f"{ram:.0f} GB" if ram else "unknown"})')
