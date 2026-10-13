@@ -18,6 +18,11 @@ up to 32 heaps, so the streaming cache never evicts and grows until the 3 GB was
 with "Invalid fixup" at 1256/1280 MB). With at most GROW_HEAP_LIMIT heaps, GetMemoryAvailable reports the real free
 space and strStreamingAllocator::MakeSpaceForAllocation deletes the least used objects instead.
 
+Also a log flush fix: netLogImpl::Flush(true) loops until the log spool thread has written the pending buffer.
+CNetwork::Shutdown stops that thread on every session shutdown (in-game Load Game, the return after Replay Mission),
+and CAILogManager::ShutDown flushes its logs after that, so the main thread spun forever right after "shutdown!".
+The wait now ends when the spool thread is gone; the flush then writes what it can without it.
+
 Reads b/8b0b5899ed/game.wasm.orig (the untouched backup) and writes b/8b0b5899ed/game.wasm.
 On the first run game.wasm is the untouched file: it is checked and copied to game.wasm.orig first.
 Restore: cp game.wasm.orig game.wasm
@@ -48,6 +53,10 @@ CASH_KEY_FLAG = 6583436 + 0xE8   # in the engine's 256-byte keyboard block (wasm
 CASH_STAT = 25469204             # StatId_char {SP0,SP1,SP2}_TOTAL_CASH (+ MP slots), set up in __wasm_call_ctors
 CASH_AMOUNT = 999999.0           # IncrementStat takes a float; exact below 2**24
 GET_STAT_ID, IS_KEY_VALID, INCREMENT_STAT = 77153, 77193, 77089  # StatId_char::GetStatId, CStatsDataMgr::IsKeyValid, CStatsMgr::IncrementStat
+
+LOG_FLUSH = (8042, 0x48c0c7)     # rage::netLogImpl::Flush(bool)
+SPOOL_THREAD_ID = 6630952        # rage::LogSpoolFunction's thread id; CNetwork::Shutdown sets it to -1 after the thread exits
+FLUSH_WAIT_LOOP = bytes.fromhex('2000 4208 7c 2102 0340')  # local.get 0; i64.const 8; i64.add; local.set 2; loop
 
 
 def asm(text):
@@ -171,7 +180,7 @@ def patch(data):
     check(len(bodies) == count and HAS_TXD_LOADED[1] in starts, 'code section')
 
     first_index = HAS_TXD_LOADED[0] - starts[HAS_TXD_LOADED[1]]
-    for index, offset in (REQUEST_MOVIE, HAS_MOVIE_LOADED, HAS_MOVIE_LOADED_NATIVE, STATS_UPDATE, GROW_HEAP):
+    for index, offset in (REQUEST_MOVIE, HAS_MOVIE_LOADED, HAS_MOVIE_LOADED_NATIVE, STATS_UPDATE, GROW_HEAP, LOG_FLUSH):
         check(starts.get(offset, -1) + first_index == index, f'func[{index}] offset')
     body = lambda fn: bodies[fn[0] - first_index]
 
@@ -201,6 +210,13 @@ def patch(data):
     grow = body(GROW_HEAP); at = locals_end(grow)
     check(grow[at:at + 13] == bytes.fromhex('024020002802fc032210411f4d'), 'GrowHeap entry')
     grow[at + 11] = GROW_HEAP_LIMIT - 1
+
+    # First thing in the wait loop: if (spoolThreadId == -1) break; (br_if 1 leaves the loop and its enclosing if)
+    flush = body(LOG_FLUSH)
+    at = flush.find(FLUSH_WAIT_LOOP)
+    check(at >= 0 and flush.count(FLUSH_WAIT_LOOP) == 1, 'netLogImpl::Flush wait loop')
+    at += len(FLUSH_WAIT_LOOP)
+    flush[at:at] = b'\x42' + sleb(SPOOL_THREAD_ID) + asm('290300 427f 51 0d01')  # i64.load; i64.const -1; i64.eq; br_if 1
 
     for fn in MOVIE_WAITS:
         check(starts.get(fn[1], -1) + first_index == fn[0], f'func[{fn[0]}] offset')

@@ -7,6 +7,7 @@ The playgta5.com web client, scraped before the site went down, plus fixes for t
 - **The game crashes after a long session** ("Invalid fixup ... is neither virtual nor physical").
 - **Missions freeze when a TV movie stops** (Michael's TV in Complications).
 - **The game crashes when the window is resized** ("table index is out of bounds").
+- **Loading a save in game freezes** (Load Game, or the return after Replay Mission).
 - Bonus: a **money hotkey**.
 
 No Rockstar files are in this repo. You need your own copy of the `mirror` folder (about 19.7 GB).
@@ -32,6 +33,9 @@ This build has no Bink, so the `AsyncBink` thread never starts and no movie ever
 ### Crash when the window is resized
 A new window size makes the engine rebuild its GPU state ("DEVICE RESTORE") while the render thread is still drawing the minimap. Sometimes that draw calls through a stale function pointer and the game dies with `table index is out of bounds`. `index.html` now follows the window size only while the loading screen is up. After that the game keeps its size and the picture stretches to the window. To play at a new size, set the window first and reload the page.
 
+### Freeze when loading a save in game
+Pause → Game → Load Game (and the return after Replay Mission) froze right after `shutdown!`. While the old session shuts down, `CNetwork::Shutdown` stops the thread that writes the network logs to disk. `CAILogManager::ShutDown` runs after it and flushes its logs, and that flush waits in a loop for the stopped thread, so the main thread spun forever. `patch_shop_menus.py` ends the wait when that thread is gone.
+
 ### Money hotkey
 Press **`-`** (the key right of `0`) in game: the current character gets **+$999,999**. Once per press, in both Story Mode and Sandbox Mode. The game never sees that key.
 
@@ -51,7 +55,7 @@ Press **`-`** (the key right of `0`) in game: the current character gets **+$999
    - Windows: `runtime\python.exe patch_shop_menus.py`
    - macOS / Linux: `python3 patch_shop_menus.py`
 
-   It should print `game.wasm patched: 63201802 -> 63202084 bytes, sha256 e548c603...`. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
+   It should print `game.wasm patched: 63201802 -> 63202097 bytes, sha256 47c9d4b1...`. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
 
    To undo: copy `game.wasm.orig` over `game.wasm` (in `mirror/playgta5.com/b/8b0b5899ed/`).
 
