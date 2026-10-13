@@ -19,7 +19,7 @@ Saving looked fine, but after a reload the save was gone. The loader restored sa
 
 - `loader.js`: the engine starts only after the restore transaction has completed.
 - `io_worker.js`: a write that hangs times out and is logged instead of waiting silently. Every save is also sent to the local server.
-- `serve_local.py`: keeps a copy of every save on disk in `save-backups/live/` (`SGTA500xx.<time>`). If the browser ever loses your saves, they are there. The server also tells the browser not to cache the scripts, so fixes like these take effect without clearing the cache.
+- `serve_local.py`: keeps a copy of every save on disk in `save-backups/live/` (`SGTA500xx.<time>`, and `MISREP0000.<time>` for the restore point Replay Mission returns to). If the browser ever loses your saves, they are there. The server also tells the browser not to cache the scripts, so fixes like these take effect without clearing the cache.
 
 ### Shop menus never open
 The data set has no `update.rpf`, so the MP/NG menu assets (`MPShopSale.ytd`, the `COLOUR_SWITCHER` movies) are missing. The shop scripts wait for them forever. `patch_shop_menus.py` patches `game.wasm` so a missing texture dictionary or scaleform movie reports "loaded" instead of blocking the menu.
@@ -34,7 +34,7 @@ This build has no Bink, so the `AsyncBink` thread never starts and no movie ever
 A new window size makes the engine rebuild its GPU state ("DEVICE RESTORE") while the render thread is still drawing the minimap. Sometimes that draw calls through a stale function pointer and the game dies with `table index is out of bounds`. `index.html` now follows the window size only while the loading screen is up. After that the game keeps its size and the picture stretches to the window. To play at a new size, set the window first and reload the page.
 
 ### Freeze when loading a save in game
-Pause → Game → Load Game (and the return after Replay Mission) froze right after `shutdown!`. While the old session shuts down, `CNetwork::Shutdown` stops the thread that writes the network logs to disk. `CAILogManager::ShutDown` runs after it and flushes its logs, and that flush waits in a loop for the stopped thread, so the main thread spun forever. `patch_shop_menus.py` ends the wait when that thread is gone.
+Pause → Game → Load Game (and the return after Replay Mission) froze right after `shutdown!`. While the old session shuts down, `CNetwork::Shutdown` stops the thread that writes the network logs to disk. `CAILogManager::ShutDown` runs after it and flushes its logs, and that flush waits in a loop for the stopped thread, so the main thread spun forever. `patch_shop_menus.py` ends the wait when that thread is gone. A log line that does not fit waited for the same thread; with the thread gone, that line is now dropped.
 
 ### Money hotkey
 Press **`-`** (the key right of `0`) in game: the current character gets **+$999,999**. Once per press, in both Story Mode and Sandbox Mode. The game never sees that key.
@@ -55,7 +55,7 @@ Press **`-`** (the key right of `0`) in game: the current character gets **+$999
    - Windows: `runtime\python.exe patch_shop_menus.py`
    - macOS / Linux: `python3 patch_shop_menus.py`
 
-   It should print `game.wasm patched: 63201802 -> 63202097 bytes, sha256 47c9d4b1...`. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
+   It should print `game.wasm patched: 63201802 -> 63202110 bytes, sha256 d059b41d...`. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
 
    To undo: copy `game.wasm.orig` over `game.wasm` (in `mirror/playgta5.com/b/8b0b5899ed/`).
 

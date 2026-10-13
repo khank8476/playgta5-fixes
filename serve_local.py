@@ -6,7 +6,7 @@ from urllib.parse import urlsplit, unquote, parse_qs
 
 ROOT = Path(__file__).resolve().parent / 'mirror' / 'playgta5.com'
 USERDATA_BACKUP = Path(__file__).resolve().parent / 'save-backups' / 'live'
-USERDATA_NAME = re.compile(r'SGTA5\d{4}(\.bak)?|pc_settings\.bin')  # basenames only: never a client-supplied path
+USERDATA_NAME = re.compile(r'(SGTA5|MISREP)\d{4}(\.bak)?|pc_settings\.bin')  # basenames only: never a client-supplied path
 mimetypes.add_type('application/wasm', '.wasm')
 mimetypes.add_type('text/javascript', '.js')
 # Harmless engine warnings repeated thousands of times per session; crash reports are never filtered.

@@ -22,6 +22,8 @@ Also a log flush fix: netLogImpl::Flush(true) loops until the log spool thread h
 CNetwork::Shutdown stops that thread on every session shutdown (in-game Load Game, the return after Replay Mission),
 and CAILogManager::ShutDown flushes its logs after that, so the main thread spun forever right after "shutdown!".
 The wait now ends when the spool thread is gone; the flush then writes what it can without it.
+netLogImpl::HandleBufferSwapFailure (a log line that does not fit) has the same wait in a retry loop; it now returns
+when the spool thread is gone, and the caller drops that line.
 
 Reads b/8b0b5899ed/game.wasm.orig (the untouched backup) and writes b/8b0b5899ed/game.wasm.
 On the first run game.wasm is the untouched file: it is checked and copied to game.wasm.orig first.
@@ -55,8 +57,10 @@ CASH_AMOUNT = 999999.0           # IncrementStat takes a float; exact below 2**2
 GET_STAT_ID, IS_KEY_VALID, INCREMENT_STAT = 77153, 77193, 77089  # StatId_char::GetStatId, CStatsDataMgr::IsKeyValid, CStatsMgr::IncrementStat
 
 LOG_FLUSH = (8042, 0x48c0c7)     # rage::netLogImpl::Flush(bool)
+LOG_SWAP_FAILURE = (8040, 0x48be2e)  # rage::netLogImpl::HandleBufferSwapFailure()
 SPOOL_THREAD_ID = 6630952        # rage::LogSpoolFunction's thread id; CNetwork::Shutdown sets it to -1 after the thread exits
 FLUSH_WAIT_LOOP = bytes.fromhex('2000 4208 7c 2102 0340')  # local.get 0; i64.const 8; i64.add; local.set 2; loop
+SWAP_WAIT_LOOP = bytes.fromhex('0440 0340')  # if (pending) loop: the wait inside the swap retry loop (the only if-loop there)
 
 
 def asm(text):
@@ -180,7 +184,7 @@ def patch(data):
     check(len(bodies) == count and HAS_TXD_LOADED[1] in starts, 'code section')
 
     first_index = HAS_TXD_LOADED[0] - starts[HAS_TXD_LOADED[1]]
-    for index, offset in (REQUEST_MOVIE, HAS_MOVIE_LOADED, HAS_MOVIE_LOADED_NATIVE, STATS_UPDATE, GROW_HEAP, LOG_FLUSH):
+    for index, offset in (REQUEST_MOVIE, HAS_MOVIE_LOADED, HAS_MOVIE_LOADED_NATIVE, STATS_UPDATE, GROW_HEAP, LOG_FLUSH, LOG_SWAP_FAILURE):
         check(starts.get(offset, -1) + first_index == index, f'func[{index}] offset')
     body = lambda fn: bodies[fn[0] - first_index]
 
@@ -211,12 +215,16 @@ def patch(data):
     check(grow[at:at + 13] == bytes.fromhex('024020002802fc032210411f4d'), 'GrowHeap entry')
     grow[at + 11] = GROW_HEAP_LIMIT - 1
 
-    # First thing in the wait loop: if (spoolThreadId == -1) break; (br_if 1 leaves the loop and its enclosing if)
-    flush = body(LOG_FLUSH)
-    at = flush.find(FLUSH_WAIT_LOOP)
-    check(at >= 0 and flush.count(FLUSH_WAIT_LOOP) == 1, 'netLogImpl::Flush wait loop')
-    at += len(FLUSH_WAIT_LOOP)
-    flush[at:at] = b'\x42' + sleb(SPOOL_THREAD_ID) + asm('290300 427f 51 0d01')  # i64.load; i64.const -1; i64.eq; br_if 1
+    # First thing in each wait loop: if (spoolThreadId == -1) break out. In Flush, br_if 1 leaves the loop and its if.
+    # In HandleBufferSwapFailure, br_if 3 leaves the wait, the swap retry loop and the block around them: the existing
+    # early return, after which the caller drops the line.
+    for fn, loop, depth, what in ((LOG_FLUSH, FLUSH_WAIT_LOOP, 1, 'Flush wait loop'),
+                                  (LOG_SWAP_FAILURE, SWAP_WAIT_LOOP, 3, 'HandleBufferSwapFailure wait loop')):
+        code = body(fn)
+        at = code.find(loop)
+        check(at >= 0 and code.count(loop) == 1, f'netLogImpl::{what}')
+        at += len(loop)
+        code[at:at] = b'\x42' + sleb(SPOOL_THREAD_ID) + asm('290300 427f 51 0d') + bytes([depth])  # i64.load; i64.const -1; i64.eq; br_if
 
     for fn in MOVIE_WAITS:
         check(starts.get(fn[1], -1) + first_index == fn[0], f'func[{fn[0]}] offset')
