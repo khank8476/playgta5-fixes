@@ -1,6 +1,6 @@
 # playgta5 fixes
 
-> **These fixes are for V1** (game build `8b0b5899ed`). V2 is a new build, and its files do not work with these fixes. For V2, see [shadany7824/playgta5](https://github.com/shadany7824/playgta5). The patch script checks the game file first and changes nothing if it is not V1.
+> **These fixes are for V1** (game build `8b0b5899ed`). V2 is a new build, and its files do not work with these fixes. For V2, see [SebasKitten/Grand-V](https://github.com/SebasKitten/Grand-V). The patch script checks the game file first and changes nothing if it is not V1.
 
 The playgta5.com web client, scraped before the site went down, plus fixes for the problems that made it hard to actually play:
 
