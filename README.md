@@ -6,6 +6,7 @@ The playgta5.com web client, scraped before the site went down, plus fixes for t
 - **Shop menus never open** (Los Santos Customs, clothes, barbers, ...).
 - **The game crashes after a long session** ("Invalid fixup ... is neither virtual nor physical").
 - **Missions freeze when a TV movie stops** (Michael's TV in Complications).
+- **The game crashes when the window is resized** ("table index is out of bounds").
 - Bonus: a **money hotkey**.
 
 No Rockstar files are in this repo. You need your own copy of the `mirror` folder (about 19.7 GB).
@@ -27,6 +28,9 @@ The streaming resource heap grew by 256 MB every time it filled up and never evi
 
 ### Freeze when a TV movie stops
 This build has no Bink, so the `AsyncBink` thread never starts and no movie ever reports loaded. `CMovieMgr::Delete` (and six other inlined copies of `CMovie::WaitTillLoaded`) slept until it did, so the main thread hung in "Movie Manager" for good, for example when Michael's TV switches off in Complications. The patch makes those waits take their existing skip path. TV screens stay blank as before.
+
+### Crash when the window is resized
+A new window size makes the engine rebuild its GPU state ("DEVICE RESTORE") while the render thread is still drawing the minimap. Sometimes that draw calls through a stale function pointer and the game dies with `table index is out of bounds`. `index.html` now follows the window size only while the loading screen is up. After that the game keeps its size and the picture stretches to the window. To play at a new size, set the window first and reload the page.
 
 ### Money hotkey
 Press **`-`** (the key right of `0`) in game: the current character gets **+$999,999**. Once per press, in both Story Mode and Sandbox Mode. The game never sees that key.

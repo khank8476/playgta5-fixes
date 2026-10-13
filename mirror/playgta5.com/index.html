@@ -370,7 +370,7 @@ else {
 	const cores = +(q.get('cores') || 0) || (lowMemory ? 2 : navigator.hardwareConcurrency);
 	if (lowMemory) hud.textContent = 'Low-memory device (' + (navigator.deviceMemory || '?') + ' GB reported): close other tabs. If the tab shows "Aw, Snap!" or SIGILL it ran out of memory.';
 postLog('[page env] ' + JSON.stringify({ deviceMemory: navigator.deviceMemory, cores: navigator.hardwareConcurrency, usingCores: cores, low: lowMemory, isolated: crossOriginIsolated, ua: navigator.userAgent.slice(0, 120), screen: screen.width + 'x' + screen.height + '@' + devicePixelRatio }));
-// Back buffer = the browser window in device pixels (native resolution), following window resizes live (see installInput). ?scale=0.75 renders at 75 % (faster), ?fixed=1 keeps the
+// Back buffer = the browser window in device pixels (native resolution), following window resizes until the loading screen is gone (see installInput). ?scale=0.75 renders at 75 % (faster), ?fixed=1 keeps the
 // start-up size whatever the window does, ?res=1920x1080 forces a size. Even numbers, at most 3840x2160 (2560x1440 in the low-memory profile: screen-sized render targets dominate GPU memory).
 wantSize = () => {
 	const forced = /^(\d+)x(\d+)$/.exec(q.get('res') || '');
@@ -516,6 +516,9 @@ function installInput(memory, block) {
 			timer = setTimeout(() => {
 				const [w, h] = wantSize();
 				if (w === W && h === H) return;
+				// In play a new size makes the engine rebuild its GPU state while the render thread still draws the minimap, and that call through
+				// a stale function pointer kills the game ("table index is out of bounds"). Keep the size from then on; the canvas stretches to the window.
+				if (!document.getElementById('loading')) { trace('window resized: back buffer kept at ' + W + 'x' + H + ' (game running)'); return; }
 				W = w; H = h;
 				Atomics.store(ext, 2, w); Atomics.store(ext, 3, h);
 				trace('window resized: back buffer ' + w + 'x' + h);
