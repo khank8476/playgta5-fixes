@@ -67,6 +67,8 @@ Press **`-`** (the key right of `0`) in game: the current character gets **+$999
 
    Then open `http://localhost:8000/`. The first time after updating, do one hard reload (Ctrl+Shift+R / Cmd+Shift+R).
 
+   If the game stutters because your machine cannot hold 60 fps, lock it to 30 fps: open `http://localhost:8000/?fps=30`. If the address already has a `?` (the macOS launcher adds one), add `&fps=30` at the end instead. The frame time then stays even, so 30 fps can feel smoother than a frame rate that jumps between 40 and 60.
+
 5. **Check that saves work** (optional). Save in game and wait a few seconds. A file should appear in `save-backups/live/`.
 
 ## Title screen
