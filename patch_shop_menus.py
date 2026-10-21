@@ -18,6 +18,11 @@ up to 32 heaps, so the streaming cache never evicts and grows until the 3 GB was
 with "Invalid fixup" at 1256/1280 MB). With a heap limit, GetMemoryAvailable reports the real free
 space and strStreamingAllocator::MakeSpaceForAllocation deletes the least used objects instead.
 The limit follows the machine's RAM (heap_limit); --heaps N overrides it. 4 heaps (1 GB) stalled missions.
+Two fixes make the cap safe on big map files. After a failed allocation, strStreamingLoader::LoadRequestedObjects
+marked the request as fitting and read it into chunks that were never allocated (pgStreamer::Read trap); it now
+waits for a later frame. Archives marked loadCompletely in images.meta (the hills' *_instance_placement.rpf, 13-57 MB)
+needed one free block of their full size, which a capped heap rarely has ("Failed to allocation virtual memory of
+size 57360384"); strPackfileManager::AddImageToList now reads them entry by entry like the other archives.
 
 Also a log flush fix: netLogImpl::Flush(true) loops until the log spool thread has written the pending buffer.
 CNetwork::Shutdown stops that thread on every session shutdown (in-game Load Game, the return after Replay Mission),
@@ -43,6 +48,12 @@ HAS_MOVIE_LOADED = (50789, 0x1dc92c4)        # graphics_commands::CommandHasScal
 HAS_MOVIE_LOADED_NATIVE = (51266, 0x1dd6879) # scrWrapped_HAS_SCALEFORM_MOVIE_LOADED::Call (inlines the command)
 STATS_UPDATE = (77092, 0x2647586)            # CStatsMgr::Update, once per game frame
 GROW_HEAP = (3036, 0x264d27)                 # rage::sysMemGrowBuddyAllocator::GrowHeap
+LOAD_REQUESTED = (6213, 0x388049)            # rage::strStreamingLoader::LoadRequestedObjects
+ADD_IMAGE = (6049, 0x372a26)                 # rage::strPackfileManager::AddImageToList
+# call SetExtraMemory; end; i32.const 1 (fits); local.set 6; end; ...; local.get 6; br_if 1
+NO_ROOM_TEST = bytes.fromhex('10fb4d 0b 4101 2106 0b 2029 42f0007c 2400 2006 0d01')
+# local.get 0; i32.const 256 (loadCompletely); i32.const 0; local.get 3; select; i32.const 8; ... i32.or
+WHOLE_LOAD_FLAG = bytes.fromhex('2000 418002 4100 2003 1b 4108 4100 2001 1b 72')
 # Each has an inlined CMovieMgr::CMovie::WaitTillLoaded: unless flags97 & 1, sleep until bwMovie byte 171 (loaded) is set.
 # Only the AsyncBink thread sets it, and the wasm build never starts that thread (no Bink), so the main thread sleeps
 # forever once a TV movie is deleted (Michael's TV in Armenian 3). 'and' -> 'or' makes the skip test always true.
@@ -205,7 +216,8 @@ def patch(data, heaps):
     check(len(bodies) == count and HAS_TXD_LOADED[1] in starts, 'code section')
 
     first_index = HAS_TXD_LOADED[0] - starts[HAS_TXD_LOADED[1]]
-    for index, offset in (REQUEST_MOVIE, HAS_MOVIE_LOADED, HAS_MOVIE_LOADED_NATIVE, STATS_UPDATE, GROW_HEAP, LOG_FLUSH, LOG_SWAP_FAILURE):
+    for index, offset in (REQUEST_MOVIE, HAS_MOVIE_LOADED, HAS_MOVIE_LOADED_NATIVE, STATS_UPDATE, GROW_HEAP,
+                          LOAD_REQUESTED, ADD_IMAGE, LOG_FLUSH, LOG_SWAP_FAILURE):
         check(starts.get(offset, -1) + first_index == index, f'func[{index}] offset')
     body = lambda fn: bodies[fn[0] - first_index]
 
@@ -235,6 +247,13 @@ def patch(data, heaps):
     grow = body(GROW_HEAP); at = locals_end(grow)
     check(grow[at:at + 13] == bytes.fromhex('024020002802fc032210411f4d'), 'GrowHeap entry')
     grow[at + 11] = heaps - 1
+
+    # With the cap, allocations can fail: "fits" 1 -> 0, and loadCompletely 256 -> 0 (same two-byte LEB).
+    for fn, test, at_byte, what in ((LOAD_REQUESTED, NO_ROOM_TEST, 5, 'LoadRequestedObjects no-room test'),
+                                    (ADD_IMAGE, WHOLE_LOAD_FLAG, 4, 'AddImageToList loadCompletely flag')):
+        code = body(fn); at = code.find(test)
+        check(at >= 0 and code.count(test) == 1, what)
+        code[at + at_byte] = 0
 
     # First thing in each wait loop: if (spoolThreadId == -1) break out. In Flush, br_if 1 leaves the loop and its if.
     # In HandleBufferSwapFailure, br_if 3 leaves the wait, the swap retry loop and the block around them: the existing

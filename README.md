@@ -1,12 +1,13 @@
 # playgta5 fixes
 
-> **These fixes are for V1** (game build `8b0b5899ed`). V2 is a new build, and its files do not work with these fixes. For V2, see [SebasKitten/Grand-V](https://github.com/SebasKitten/Grand-V). The patch script checks the game file first and changes nothing if it is not V1.
+> **These fixes are for V1** (game build `8b0b5899ed`). V2 is a new build, and its files do not work with these fixes. For V2, see [Grand-V-but-clean](https://github.com/waste-mgmt-consultant/Grand-V-but-clean), a fork of [SebasKitten/Grand-V](https://gitlab.com/SebasKitten/Grand-V) that already has the memory fixes below. The patch script checks the game file first and changes nothing if it is not V1.
 
 The playgta5.com web client, scraped before the site went down, plus fixes for the problems that made it hard to actually play:
 
 - **Saves disappear** after a reload.
 - **Shop menus never open** (Los Santos Customs, clothes, barbers, ...).
 - **The game crashes after a long session** ("Invalid fixup ... is neither virtual nor physical").
+- **The game crashes or the map stops loading on big map files** ("Failed to allocation virtual memory of size ...").
 - **Missions freeze when a TV movie stops** (Michael's TV in Complications).
 - **The game crashes when the window is resized** ("table index is out of bounds").
 - **Loading a save in game freezes** (Load Game, or the return after Replay Mission).
@@ -28,6 +29,9 @@ The data set has no `update.rpf`, so the MP/NG menu assets (`MPShopSale.ytd`, th
 
 ### Crash after playing for a while
 The streaming resource heap grew by 256 MB every time it filled up and never evicted anything. In a long session the game died while loading a map piece. (The wasm memory starts at 3 GB but can grow to 16 GB; `game.js` sets `maximum: 262144n` pages.) The patch caps that heap, so the game unloads the least used models instead of growing. A side effect can be a little texture pop-in. The cap follows your RAM: 1.5 GB (6 x 256 MB) below 12 GB, 1.75 GB (7) otherwise. Each step costs the browser tab about 256 MB more. To choose it yourself, run `patch_shop_menus.py --heaps N`; 2 GB (8) is untested. A 1 GB cap (4) was too small for Complications: the heap filled to 1018/1024 MB and missions stalled with streaming requests that could never be placed. At 1.5 GB the Armenian1 chase filled it to 1529/1536 MB; one file could not be placed for a few seconds and the game hitched once for 0.4 s.
+
+### Crash or stall on big map files
+With the cap, the game could crash in `pgStreamer::Read` after "Failed to allocation virtual memory of size 57360384" (reported in Fame or Shame), or the map could stop loading. A bigger cap does not help. Some archives are marked `loadCompletely` in `images.meta`, for example the hills' `*_instance_placement.rpf` files (13-57 MB), and the game read each one into one block of its full size. A capped heap rarely has a block that big. When the allocation failed, the loader still went on and read into memory it never got. Now the loader waits for a later frame instead, and those archives are read entry by entry like all the others. The same fix runs in V2. It is not tested in a long V1 session yet; if it is wrong, expect missing grass or lights rather than a crash.
 
 ### Freeze when a TV movie stops
 This build has no Bink, so the `AsyncBink` thread never starts and no movie ever reports loaded. `CMovieMgr::Delete` (and six other inlined copies of `CMovie::WaitTillLoaded`) slept until it did, so the main thread hung in "Movie Manager" for good, for example when Michael's TV switches off in Complications. The patch makes those waits take their existing skip path. TV screens stay blank as before.
@@ -57,7 +61,7 @@ Press **`-`** (the key right of `0`) in game: the current character gets **+$999
    - Windows: `runtime\python.exe patch_shop_menus.py`
    - macOS / Linux: `python3 patch_shop_menus.py`
 
-   It should print `game.wasm patched: 63201802 -> 63202110 bytes` and the cache size it chose for your RAM. The sha256 is `d059b41d...` for 6 heaps, `854c92a1...` for 7 and `785c3d52...` for 8. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
+   It should print `game.wasm patched: 63201802 -> 63202110 bytes` and the cache size it chose for your RAM. The sha256 is `76b80c59...` for 6 heaps, `927e61b4...` for 7 and `2b769b47...` for 8. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
 
    To undo: copy `game.wasm.orig` over `game.wasm` (in `mirror/playgta5.com/b/8b0b5899ed/`).
 
