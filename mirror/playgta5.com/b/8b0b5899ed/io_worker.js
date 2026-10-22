@@ -656,7 +656,7 @@ self.onmessage = async (ev) => {
 	if (m.userdata) {
 		const record = { data: m.userdata.data, mtime: m.userdata.mtime };
 		log('[io] userdata received ' + m.userdata.path + ' (' + record.data.length + ' bytes)');
-		userdataBackup(m.userdata.path, record);
+		if (!m.restored) userdataBackup(m.userdata.path, record);		// loader.js restored it from that disk copy
 		userdataWrite(m.userdata.path, record);
 		return;
 	}

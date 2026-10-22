@@ -23,7 +23,8 @@ Saving looked fine, but after a reload the save was gone. The loader restored sa
 
 - `loader.js`: the engine starts only after the restore transaction has completed.
 - `io_worker.js`: a write that hangs times out and is logged instead of waiting silently. Every save is also sent to the local server.
-- `serve_local.py`: keeps a copy of every save on disk in `save-backups/live/` (`SGTA500xx.<time>`, and `MISREP0000.<time>` for the restore point Replay Mission returns to). If the browser ever loses your saves, they are there. The server also tells the browser not to cache the scripts, so fixes like these take effect without clearing the cache.
+- `serve_local.py`: keeps a copy of every save on disk in `save-backups/live/` (`SGTA500xx.<time>`, and `MISREP0000.<time>` for the restore point Replay Mission returns to). The server also tells the browser not to cache the scripts, so fixes like these take effect without clearing the cache.
+- `loader.js`: if the browser has no savegame (a new browser profile, an incognito window, cleared site data), the game takes the newest copy of each file from `save-backups/live/` and stores it in the browser again. A disk copy that is newer than the browser's copy also wins. The disk copy never replaces a newer save, and a save you delete in the game stays deleted (unless you delete every save). The launcher window shows each restored file as `[server] userdata restored from save-backups/live/...`. Keep the `save-backups` folder when you download a new version of this repo: copy it into the new folder before you start the game.
 
 ### Shop menus never open
 The data set has no `update.rpf`, so the MP/NG menu assets (`MPShopSale.ytd`, the `COLOUR_SWITCHER` movies) are missing. The shop scripts wait for them forever. `patch_shop_menus.py` patches `game.wasm` so a missing texture dictionary or scaleform movie reports "loaded" instead of blocking the menu.

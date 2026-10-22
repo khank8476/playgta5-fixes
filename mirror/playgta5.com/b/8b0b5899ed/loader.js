@@ -129,24 +129,49 @@ self.onmessage = (ev) => {
 				};
 			},
 			// Savegames and settings kept in IndexedDB by io_worker.js (platform/file/userdata_wasm.cpp sends them): put them back into the in-memory /userdata before the engine looks at it. The run
-			// dependency holds main() until they are in (or 8 s, so a broken IndexedDB cannot keep the game from starting). Only /userdata/ paths are accepted.
+			// dependency holds main() until they are in (or 8 s, so a broken IndexedDB or server cannot keep the game from starting). Only /userdata/ paths are accepted.
 			preRun: [() => {
 				if (typeof FS === 'undefined' || typeof addRunDependency !== 'function' || typeof indexedDB === 'undefined') return;
 				addRunDependency('userdata');
 				let finished = false;
 				const finish = (note) => { if (finished) return; finished = true; self.__log('[loader] userdata: ' + note); self.__logFlush(); removeRunDependency('userdata'); };
 				setTimeout(() => finish('timed out'), 8000);
+				const have = {};		// path -> mtime of each file restored from IndexedDB
+				// serve_local.py keeps every save in save-backups/live/. Its newest copy of a file goes in when IndexedDB has an older one (a failed write), or has no
+				// file of that name and no savegame at all (a new browser profile, an incognito window, cleared site data); a save deleted in the game stays deleted.
+				// io_worker.js stores what came in, so IndexedDB is whole again for the next start.
+				const fromDisk = async (note) => {
+					let n = 0;
+					try {
+						const res = await fetch('/userdata');
+						if (!res.ok) throw new Error('HTTP ' + res.status);
+						const noSave = !Object.keys(have).some((p) => /\/SGTA5\d{4}$/.test(p));
+						for (const [name, mtime] of Object.entries(await res.json())) {
+							const path = '/userdata/Documents/Rockstar Games/GTA V/' + (name === 'pc_settings.bin' ? '' : 'Default/') + name;
+							if (!(path in have ? Math.round(have[path]) < mtime : noSave)) continue;
+							const file = await fetch('/userdata?name=' + name + '&mtime=' + mtime);
+							if (!file.ok) throw new Error(name + ' HTTP ' + file.status);
+							const data = new Uint8Array(await file.arrayBuffer());
+							FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
+							FS.writeFile(path, data);
+							FS.utime(path, mtime, mtime);
+							io.postMessage({ userdata: { path, data, mtime }, restored: true });
+							n++;
+						}
+						finish(note + ', ' + n + ' from save-backups/live');
+					} catch (e) { finish(note + ', ' + n + ' from save-backups/live, then failed: ' + e); }
+				};
 				try {
 					const r = indexedDB.open('gta5-userdata', 1);
 					r.onupgradeneeded = () => r.result.createObjectStore('files');
-					r.onerror = () => finish('IndexedDB unavailable: ' + r.error);
+					r.onerror = () => fromDisk('IndexedDB unavailable: ' + r.error);
 					r.onsuccess = () => {
 						let n = 0, bytes = 0;
 						try {
 							// finish() can start main(), which never returns to this worker's event loop. Called from inside a request callback, the
 							// transaction never commits and its lock blocks every later write by io_worker.js. So finish only once it has completed.
 							const db = r.result, t = db.transaction('files', 'readonly');
-							t.oncomplete = () => { db.close(); finish('restored ' + n + ' file(s), ' + bytes + ' bytes'); };
+							t.oncomplete = () => { db.close(); fromDisk('restored ' + n + ' file(s), ' + bytes + ' bytes'); };
 							t.onabort = () => { db.close(); finish('read aborted: ' + t.error); };
 							const req = t.objectStore('files').openCursor();		// a failed request aborts the transaction: onabort reports it
 							req.onsuccess = () => {
@@ -158,6 +183,7 @@ self.onmessage = (ev) => {
 										FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
 										FS.writeFile(path, c.value.data);
 										FS.utime(path, c.value.mtime, c.value.mtime);
+										have[path] = c.value.mtime;
 										n++; bytes += c.value.data.length;
 									}
 								} catch (e) { self.__log('[loader] userdata: ' + path + ' not restored: ' + e); }

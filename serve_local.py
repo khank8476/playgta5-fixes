@@ -78,6 +78,35 @@ class Handler(SimpleHTTPRequestHandler):
     def log_request(self, code='-', size='-'):
         pass  # no access lines; errors still print via log_error
 
+    def do_GET(self):
+        url = urlsplit(self.path)
+        if url.path != '/userdata':
+            return super().do_GET()
+        # loader.js asks for the newest copy of each file in save-backups/live/ (no query), then for the files it restores (?name=&mtime=).
+        query = parse_qs(url.query)
+        name, mtime = query.get('name', [''])[0], query.get('mtime', [''])[0]
+        if name:
+            file = USERDATA_BACKUP / ('%s.%s' % (name, mtime))
+            if not USERDATA_NAME.fullmatch(name) or not mtime.isdigit() or not file.is_file():
+                self.send_error(404)
+                return
+            body = file.read_bytes()
+            print('[server] userdata restored from save-backups/live/%s (%d bytes)' % (file.name, len(body)), flush=True)
+            content_type = 'application/octet-stream'
+        else:
+            newest = {}
+            for file in USERDATA_BACKUP.glob('*') if USERDATA_BACKUP.is_dir() else ():
+                stem, _, stamp = file.name.rpartition('.')
+                if USERDATA_NAME.fullmatch(stem) and stamp.isdigit() and int(stamp) > newest.get(stem, -1):
+                    newest[stem] = int(stamp)
+            body = json.dumps(newest).encode()
+            content_type = 'application/json'
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_PUT(self):
         # loader.js sends the JPEG of each Snapmatic gallery photo (Story and Sandbox) here.
         name = urlsplit(self.path).path.removeprefix('/photos/')
