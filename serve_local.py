@@ -7,6 +7,8 @@ from urllib.parse import urlsplit, unquote, parse_qs
 ROOT = Path(__file__).resolve().parent / 'mirror' / 'playgta5.com'
 USERDATA_BACKUP = Path(__file__).resolve().parent / 'save-backups' / 'live'
 USERDATA_NAME = re.compile(r'(SGTA5|MISREP)\d{4}(\.bak)?|pc_settings\.bin')  # basenames only: never a client-supplied path
+PHOTOS = Path(__file__).resolve().parent / 'photos'
+PHOTO_NAME = re.compile(r'PGTA5\d{1,12}\.jpg')
 mimetypes.add_type('application/wasm', '.wasm')
 mimetypes.add_type('text/javascript', '.js')
 # Harmless engine warnings repeated thousands of times per session; crash reports are never filtered.
@@ -75,6 +77,23 @@ class Handler(SimpleHTTPRequestHandler):
 
     def log_request(self, code='-', size='-'):
         pass  # no access lines; errors still print via log_error
+
+    def do_PUT(self):
+        # loader.js sends the JPEG of each Snapmatic gallery photo (Story and Sandbox) here.
+        name = urlsplit(self.path).path.removeprefix('/photos/')
+        length = int(self.headers.get('Content-Length', '0'))
+        if not PHOTO_NAME.fullmatch(name) or not 0 < length <= 8 * 1024 * 1024:
+            self.send_error(400)
+            return
+        data = self.rfile.read(length)
+        if not data.startswith(b'\xff\xd8\xff'):
+            self.send_error(400)
+            return
+        PHOTOS.mkdir(exist_ok=True)
+        (PHOTOS / name).write_bytes(data)
+        print('[server] photo saved: photos/%s (%d bytes)' % (name, length), flush=True)
+        self.send_response(204)
+        self.end_headers()
 
     def do_POST(self):
         url = urlsplit(self.path)

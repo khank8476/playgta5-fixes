@@ -3,5 +3,6 @@ media/
 last-session.log
 previous-session.log
 save-backups/
+photos/
 __pycache__/
 ._*

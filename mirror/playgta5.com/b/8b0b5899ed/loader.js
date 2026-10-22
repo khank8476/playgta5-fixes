@@ -102,6 +102,32 @@ self.onmessage = (ev) => {
 			locateFile: (p) => B + '/' + p,
 			onExit: (code) => { console.error('EXIT ' + code); self.__log('EXIT ' + code); self.__logFlush(); if (code) self.__crash('exit', 'EXIT ' + code); },
 			onAbort: (what) => { console.error('ABORT ' + what); self.__log('ABORT ' + what); self.__logFlush(); self.__crash('abort', 'ABORT ' + what); },
+			// Snapmatic gallery photos: send the JPEG of each PGTA5<id> file the engine writes, in Story (/userdata) and Sandbox (/sandbox), to
+			// serve_local.py, which keeps it in photos/. Installed after the save restore, so restored photos are not sent again. This thread never
+			// returns to its event loop, so the request is synchronous. CPhotoBuffer layout: "JPEG", u32 buffer size, u32 image size, image.
+			onRuntimeInitialized: () => {
+				const close = FS.close;
+				FS.close = (stream) => {
+					const path = stream.path || '', written = (stream.flags & 3) !== 0, name = /PGTA5\d+$/.exec(path);
+					close(stream);
+					if (!written || !name) return;
+					try {
+						const d = FS.readFile(path), view = new DataView(d.buffer, d.byteOffset, d.length);
+						let jpeg = null;
+						for (let t = 0; !jpeg && t + 12 <= d.length; t++) {
+							if (view.getUint32(t) !== 0x4a504547) continue;
+							const s = t + 12, e = s + view.getUint32(t + 8, true);
+							if (e <= d.length && d[s] === 0xff && d[s + 1] === 0xd8) jpeg = d.subarray(s, e);
+						}
+						if (!jpeg) throw new Error('no JPEG');
+						const x = new XMLHttpRequest();
+						x.open('PUT', '/photos/' + name[0] + '.jpg', false);
+						x.timeout = 5000;
+						x.send(jpeg);
+						self.__log('[loader] photo: ' + (x.status === 204 ? 'saved photos/' + name[0] + '.jpg' : name[0] + ' HTTP ' + x.status));
+					} catch (e) { self.__log('[loader] photo: ' + name[0] + ' ' + e); }
+				};
+			},
 			// Savegames and settings kept in IndexedDB by io_worker.js (platform/file/userdata_wasm.cpp sends them): put them back into the in-memory /userdata before the engine looks at it. The run
 			// dependency holds main() until they are in (or 8 s, so a broken IndexedDB cannot keep the game from starting). Only /userdata/ paths are accepted.
 			preRun: [() => {

@@ -12,7 +12,7 @@ The playgta5.com web client, scraped before the site went down, plus fixes for t
 - **The game crashes when the window is resized** ("table index is out of bounds").
 - **Loading a save in game freezes** (Load Game, or the return after Replay Mission).
 - **Taking a Snapmatic photo crashes the game**, or the photo is black.
-- Bonus: a **money hotkey**.
+- Bonus: a **money hotkey**, and **Snapmatic photos as JPG files**.
 
 No Rockstar files are in this repo. You need your own copy of the `mirror` folder (about 19.7 GB).
 
@@ -47,6 +47,9 @@ Pause → Game → Load Game (and the return after Replay Mission) froze right a
 Taking a photo with the phone camera froze and then crashed the game. The game writes the photo's JPEG into a memory buffer named `memory:$0x...`. `fiDeviceMemory::Create` read the buffer address from the wrong place (it did not skip the `0x`), so the address was 0 and the write failed. libjpeg then ended the game. `patch_shop_menus.py` makes it skip the `0x`, like the read path already does.
 
 The photo was also black. `wgpu_worker.js` skips a draw while its GPU pipeline still compiles. The one draw that copies the frame into the photo had no entry in `shaders/pipelines.json`, so it was never compiled ahead and the photo stayed empty. `patch_shop_menus.py` adds that entry to `pipelines.json` and `pipelines_low.json`.
+
+### Photos as JPG files
+Each photo you save to the phone gallery, in Story or Sandbox, is also saved as `photos/PGTA5<number>.jpg` in the repo folder. `loader.js` sends the photo's JPEG to `serve_local.py`, which writes the file. The file stays when you delete the photo in the game. The game does not keep Sandbox files, so after a page reload the Sandbox gallery is empty again. The JPG file stays.
 
 ### Money hotkey
 Press **`-`** (the key right of `0`) in game: the current character gets **+$999,999**. Once per press, in both Story Mode and Sandbox Mode. The game never sees that key.
