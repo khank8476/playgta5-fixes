@@ -38,6 +38,12 @@ The photo was also black: wgpu_worker.js skips a draw while its pipeline still c
 the frame into the photo had no recipe in shaders/pipelines.json, so it was never compiled ahead. The script adds it
 to pipelines.json and pipelines_low.json.
 
+Also a script camera fix. With keyboard and mouse, Paparazzo's film camera reads only INPUT_SCALED_LOOK_LR/UD, and the
+2013 control data (data/common/data/control/settings.meta) has no axis for them, so they stay 0 and the camera does not
+turn. The script adds both axes, built from the same halves as INPUT_LOOK_LR/UD, so they get the same mouse and pad input.
+io_worker.js reads only the manifest size of the file, so it keeps its size: its CRLF line ends become LF and spaces fill
+the end. The untouched file is kept as settings.meta.orig.
+
 Reads b/8b0b5899ed/game.wasm.orig (the untouched backup) and writes b/8b0b5899ed/game.wasm.
 On the first run game.wasm is the untouched file: it is checked and copied to game.wasm.orig first.
 Restore: cp game.wasm.orig game.wasm
@@ -72,6 +78,10 @@ MOVIE_WAIT_TEST = bytes.fromhex('2d0061' '4101' '71' '45' '0440' '4285f004')  # 
 MEMORY_NAME_TEST = bytes.fromhex('2001 42c48eb901 4207 10bec605 0d00 2001 4208 7c 2100 0340')
 
 # The pipeline that copies the frame into the photo (PS_Blit into the rgba8unorm photo target), as wgpu_worker.js records it.
+SETTINGS = DIR.parent.parent / 'data' / 'common' / 'data' / 'control' / 'settings.meta'
+SETTINGS_SHA256 = 'a0e165a0907bef6d377b253e4465d4b1a952808a47795a303530199fa9bfd8e5'
+SCALED_LOOK_AXES = (b'<Item><Input>INPUT_SCALED_LOOK_UD</Input><Negative>INPUT_LOOK_UP_ONLY</Negative><Positive>INPUT_LOOK_DOWN_ONLY</Positive></Item>'
+                    b'<Item><Input>INPUT_SCALED_LOOK_LR</Input><Negative>INPUT_LOOK_LEFT_ONLY</Negative><Positive>INPUT_LOOK_RIGHT_ONLY</Positive></Item>')
 PHOTO_PIPELINE = {"vs": "4e1d5d361e0ed0bc", "ps": "01a05b914ee571f0",
                   "el": [[2013849738, 0, 6, 0, 0, 0, 0], [1009949074, 0, 6, 0, 12, 0, 0], [3888318712, 0, 28, 0, 24, 0, 0], [197415955, 0, 16, 0, 28, 0, 0]],
                   "st": [36], "tp": 4, "sf": "", "b": [0, 0, 0, 2, 1, 1, 2, 1, 1, 15] + [0, 2, 1, 1, 2, 1, 1, 15] * 7,
@@ -309,6 +319,26 @@ def add_photo_pipeline():
         print(f'{name}: photo pipeline present ({len(recipes)} recipes)')
 
 
+def scaled_look(meta):
+    fixed = meta.replace(b'\r\n', b'\n').replace(b'</AxisDefinitions>', SCALED_LOOK_AXES + b'</AxisDefinitions>', 1)
+    return fixed + b' ' * (len(meta) - len(fixed))
+
+
+def add_scaled_look():
+    orig = SETTINGS.with_name('settings.meta.orig')
+    if not orig.exists():
+        if hashlib.sha256(SETTINGS.read_bytes()).hexdigest() != SETTINGS_SHA256:
+            print('settings.meta: not the expected file, camera fix not written')
+            return
+        shutil.copy2(SETTINGS, orig)
+    source = orig.read_bytes()
+    if hashlib.sha256(source).hexdigest() != SETTINGS_SHA256:
+        print('settings.meta.orig: not the expected file, camera fix not written')
+        return
+    SETTINGS.write_bytes(scaled_look(source))
+    print('settings.meta: scaled look axes present (script cameras)')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--heaps', type=int, help='streaming cache size in 256 MB heaps, 1-32 (default: from RAM, 6-7)')
@@ -328,3 +358,4 @@ if __name__ == '__main__':
     print(f'game.wasm patched: {len(source)} -> {len(patched)} bytes, sha256 {hashlib.sha256(patched).hexdigest()}')
     print(f'streaming cache: {heaps * 256} MB ({heaps} x 256 MB, RAM {f"{ram:.0f} GB" if ram else "unknown"})')
     add_photo_pipeline()
+    add_scaled_look()

@@ -152,6 +152,11 @@ async function openStore(version) {
 			const f = files[id];
 			if (f && off + blockLen(f, block) <= storeEnd) { index.set(id * 1048576 + block, off); good++; }
 		}
+		// patch_shop_menus.py rewrites these files in place (same size, same manifest version): their stored blocks may hold the old bytes.
+		for (const path of PATCHED_FILES) {
+			const id = pathIndex.get(path);
+			if (id !== undefined) for (let block = 0; block < Math.ceil(files[id].size / BS); block++) index.delete(id * 1048576 + block);
+		}
 		journalEnd = 16 + n * 16;
 		sh = s; jh = j;
 		log('[io] persistent store: ' + good + ' blocks (' + (good * BS / 1048576 | 0) + ' MB), store.bin ' + (storeEnd / 1048576 | 0) + ' MB');
@@ -583,6 +588,7 @@ async function loop() {
 	}
 }
 
+const PATCHED_FILES = ['common/data/control/settings.meta'];
 let ready = null;
 async function init(m) {
 	base = m.base; bc = new BroadcastChannel('game-progress'); remoteLog = !!m.log; noHints = !!m.noHints;
