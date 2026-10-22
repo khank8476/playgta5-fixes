@@ -31,11 +31,18 @@ The wait now ends when the spool thread is gone; the flush then writes what it c
 netLogImpl::HandleBufferSwapFailure (a log line that does not fit) has the same wait in a retry loop; it now returns
 when the spool thread is gone, and the caller drops that line.
 
+Also a Snapmatic photo fix. fiDeviceMemory::Create read the buffer address of a "memory:$%p,..." file name from
+name + 8, but musl's %p writes "0x" first, so the address read as 0 and every write into that file failed. The phone
+camera writes its JPEG this way, and libjpeg's write error ended the game. Create now skips the "0x" like Open does.
+The photo was also black: wgpu_worker.js skips a draw while its pipeline still compiles, and the one quad that copies
+the frame into the photo had no recipe in shaders/pipelines.json, so it was never compiled ahead. The script adds it
+to pipelines.json and pipelines_low.json.
+
 Reads b/8b0b5899ed/game.wasm.orig (the untouched backup) and writes b/8b0b5899ed/game.wasm.
 On the first run game.wasm is the untouched file: it is checked and copied to game.wasm.orig first.
 Restore: cp game.wasm.orig game.wasm
 """
-import argparse, hashlib, os, shutil, struct, sys
+import argparse, hashlib, json, os, shutil, struct, sys
 from pathlib import Path
 
 DIR = Path(__file__).resolve().parent / 'mirror' / 'playgta5.com' / 'b' / '8b0b5899ed'
@@ -50,6 +57,7 @@ STATS_UPDATE = (77092, 0x2647586)            # CStatsMgr::Update, once per game 
 GROW_HEAP = (3036, 0x264d27)                 # rage::sysMemGrowBuddyAllocator::GrowHeap
 LOAD_REQUESTED = (6213, 0x388049)            # rage::strStreamingLoader::LoadRequestedObjects
 ADD_IMAGE = (6049, 0x372a26)                 # rage::strPackfileManager::AddImageToList
+MEMORY_CREATE = (1822, 0x1ea8d9)             # rage::fiDeviceMemory::Create
 # call SetExtraMemory; end; i32.const 1 (fits); local.set 6; end; ...; local.get 6; br_if 1
 NO_ROOM_TEST = bytes.fromhex('10fb4d 0b 4101 2106 0b 2029 42f0007c 2400 2006 0d01')
 # local.get 0; i32.const 256 (loadCompletely); i32.const 0; local.get 3; select; i32.const 8; ... i32.or
@@ -60,6 +68,15 @@ WHOLE_LOAD_FLAG = bytes.fromhex('2000 418002 4100 2003 1b 4108 4100 2001 1b 72')
 MOVIE_WAITS = ((80969, 0x29996d6), (80987, 0x29a3c98), (81493, 0x29fbf85), (81494, 0x29fc348), (81507, 0x29fd2b2),
                (36164, 0x14905f6), (36283, 0x14af1e9))  # CMovieMgr: UpdateFrame, Delete, CMovie::Play, Stop, GetTime; CPauseMenu: Open, SetupCodeForUnPause
 MOVIE_WAIT_TEST = bytes.fromhex('2d0061' '4101' '71' '45' '0440' '4285f004')  # load8_u 97; i32.const 1; and; eqz; if; i64.const 79877
+# strncmp(name, "memory:", 7); br_if; local.get 1; i64.const 8 (name + 8, the byte that becomes 10); i64.add; local.set 0; loop
+MEMORY_NAME_TEST = bytes.fromhex('2001 42c48eb901 4207 10bec605 0d00 2001 4208 7c 2100 0340')
+
+# The pipeline that copies the frame into the photo (PS_Blit into the rgba8unorm photo target), as wgpu_worker.js records it.
+PHOTO_PIPELINE = {"vs": "4e1d5d361e0ed0bc", "ps": "01a05b914ee571f0",
+                  "el": [[2013849738, 0, 6, 0, 0, 0, 0], [1009949074, 0, 6, 0, 12, 0, 0], [3888318712, 0, 28, 0, 24, 0, 0], [197415955, 0, 16, 0, 28, 0, 0]],
+                  "st": [36], "tp": 4, "sf": "", "b": [0, 0, 0, 2, 1, 1, 2, 1, 1, 15] + [0, 2, 1, 1, 2, 1, 1, 15] * 7,
+                  "d": [0, 0, 8, 0, 65535, 1, 1, 1, 8, 1, 1, 1, 8], "r": [3, 1, 1, 0, 0, 0, 1, 1, 0, 0],
+                  "rt": ["rgba8unorm"], "n": 1, "ds": "", "ro": 0}
 
 # Cash hotkey. index.html sets CASH_KEY_FLAG once per press; CStatsMgr::Update consumes it.
 CASH_KEY_FLAG = 6583436 + 0xE8   # in the engine's 256-byte keyboard block (wasm_input_test_key); VK 0xE8 is unassigned
@@ -217,7 +234,7 @@ def patch(data, heaps):
 
     first_index = HAS_TXD_LOADED[0] - starts[HAS_TXD_LOADED[1]]
     for index, offset in (REQUEST_MOVIE, HAS_MOVIE_LOADED, HAS_MOVIE_LOADED_NATIVE, STATS_UPDATE, GROW_HEAP,
-                          LOAD_REQUESTED, ADD_IMAGE, LOG_FLUSH, LOG_SWAP_FAILURE):
+                          LOAD_REQUESTED, ADD_IMAGE, LOG_FLUSH, LOG_SWAP_FAILURE, MEMORY_CREATE):
         check(starts.get(offset, -1) + first_index == index, f'func[{index}] offset')
     body = lambda fn: bodies[fn[0] - first_index]
 
@@ -266,6 +283,11 @@ def patch(data, heaps):
         at += len(loop)
         code[at:at] = b'\x42' + sleb(SPOOL_THREAD_ID) + asm('290300 427f 51 0d') + bytes([depth])  # i64.load; i64.const -1; i64.eq; br_if
 
+    # fiDeviceMemory::Create: name + 8 -> name + 10, past the "0x" of %p (a null %p is 16 zeros, still read as 0).
+    code = body(MEMORY_CREATE); at = code.find(MEMORY_NAME_TEST)
+    check(at >= 0 and code.count(MEMORY_NAME_TEST) == 1, 'fiDeviceMemory::Create name offset')
+    code[at + 18] = 10
+
     for fn in MOVIE_WAITS:
         check(starts.get(fn[1], -1) + first_index == fn[0], f'func[{fn[0]}] offset')
         movie = body(fn); at = movie.find(MOVIE_WAIT_TEST)
@@ -275,6 +297,16 @@ def patch(data, heaps):
     payload = enc_leb(count) + b''.join(enc_leb(len(b)) + b for b in bodies)
     section = bytes([10]) + enc_leb(len(payload)) + payload
     return data[:section_start] + section + data[section_end:]
+
+
+def add_photo_pipeline():
+    for name in ('pipelines.json', 'pipelines_low.json'):
+        path = DIR / 'shaders' / name
+        recipes = json.loads(path.read_text())
+        if PHOTO_PIPELINE not in recipes:
+            recipes.append(PHOTO_PIPELINE)
+            path.write_text(json.dumps(recipes, separators=(',', ':')))
+        print(f'{name}: photo pipeline present ({len(recipes)} recipes)')
 
 
 if __name__ == '__main__':
@@ -295,3 +327,4 @@ if __name__ == '__main__':
     (DIR / 'game.wasm').write_bytes(patched)
     print(f'game.wasm patched: {len(source)} -> {len(patched)} bytes, sha256 {hashlib.sha256(patched).hexdigest()}')
     print(f'streaming cache: {heaps * 256} MB ({heaps} x 256 MB, RAM {f"{ram:.0f} GB" if ram else "unknown"})')
+    add_photo_pipeline()

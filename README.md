@@ -11,6 +11,7 @@ The playgta5.com web client, scraped before the site went down, plus fixes for t
 - **Missions freeze when a TV movie stops** (Michael's TV in Complications).
 - **The game crashes when the window is resized** ("table index is out of bounds").
 - **Loading a save in game freezes** (Load Game, or the return after Replay Mission).
+- **Taking a Snapmatic photo crashes the game**, or the photo is black.
 - Bonus: a **money hotkey**.
 
 No Rockstar files are in this repo. You need your own copy of the `mirror` folder (about 19.7 GB).
@@ -42,6 +43,11 @@ A new window size makes the engine rebuild its GPU state ("DEVICE RESTORE") whil
 ### Freeze when loading a save in game
 Pause → Game → Load Game (and the return after Replay Mission) froze right after `shutdown!`. While the old session shuts down, `CNetwork::Shutdown` stops the thread that writes the network logs to disk. `CAILogManager::ShutDown` runs after it and flushes its logs, and that flush waits in a loop for the stopped thread, so the main thread spun forever. `patch_shop_menus.py` ends the wait when that thread is gone. A log line that does not fit waited for the same thread; with the thread gone, that line is now dropped.
 
+### Snapmatic photo crash and black photo
+Taking a photo with the phone camera froze and then crashed the game. The game writes the photo's JPEG into a memory buffer named `memory:$0x...`. `fiDeviceMemory::Create` read the buffer address from the wrong place (it did not skip the `0x`), so the address was 0 and the write failed. libjpeg then ended the game. `patch_shop_menus.py` makes it skip the `0x`, like the read path already does.
+
+The photo was also black. `wgpu_worker.js` skips a draw while its GPU pipeline still compiles. The one draw that copies the frame into the photo had no entry in `shaders/pipelines.json`, so it was never compiled ahead and the photo stayed empty. `patch_shop_menus.py` adds that entry to `pipelines.json` and `pipelines_low.json`.
+
 ### Money hotkey
 Press **`-`** (the key right of `0`) in game: the current character gets **+$999,999**. Once per press, in both Story Mode and Sandbox Mode. The game never sees that key.
 
@@ -61,7 +67,7 @@ Press **`-`** (the key right of `0`) in game: the current character gets **+$999
    - Windows: `runtime\python.exe patch_shop_menus.py`
    - macOS / Linux: `python3 patch_shop_menus.py`
 
-   It should print `game.wasm patched: 63201802 -> 63202110 bytes` and the cache size it chose for your RAM. The sha256 is `76b80c59...` for 6 heaps, `927e61b4...` for 7 and `2b769b47...` for 8. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
+   It should print `game.wasm patched: 63201802 -> 63202110 bytes` and the cache size it chose for your RAM. The sha256 is `49c33612...` for 6 heaps, `7a6f1e4f...` for 7 and `9332b45b...` for 8. It also prints `pipelines.json: photo pipeline present (721 recipes)` and the same for `pipelines_low.json` (426). The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
 
    To undo: copy `game.wasm.orig` over `game.wasm` (in `mirror/playgta5.com/b/8b0b5899ed/`).
 
