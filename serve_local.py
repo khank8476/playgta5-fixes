@@ -97,7 +97,7 @@ class Handler(SimpleHTTPRequestHandler):
             newest = {}
             for file in USERDATA_BACKUP.glob('*') if USERDATA_BACKUP.is_dir() else ():
                 stem, _, stamp = file.name.rpartition('.')
-                if USERDATA_NAME.fullmatch(stem) and stamp.isdigit() and int(stamp) > newest.get(stem, -1):
+                if USERDATA_NAME.fullmatch(stem) and stamp.isdigit() and int(stamp) > newest.get(stem, -1) and file.stat().st_size:
                     newest[stem] = int(stamp)
             body = json.dumps(newest).encode()
             content_type = 'application/json'

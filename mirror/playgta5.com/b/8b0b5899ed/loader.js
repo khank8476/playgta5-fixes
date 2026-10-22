@@ -129,37 +129,46 @@ self.onmessage = (ev) => {
 				};
 			},
 			// Savegames and settings kept in IndexedDB by io_worker.js (platform/file/userdata_wasm.cpp sends them): put them back into the in-memory /userdata before the engine looks at it. The run
-			// dependency holds main() until they are in (or 8 s, so a broken IndexedDB or server cannot keep the game from starting). Only /userdata/ paths are accepted.
+			// dependency holds main() until they are in (or 8 s for IndexedDB, then 8 s for the server, so neither can keep the game from starting). Only /userdata/ paths are accepted.
 			preRun: [() => {
 				if (typeof FS === 'undefined' || typeof addRunDependency !== 'function' || typeof indexedDB === 'undefined') return;
 				addRunDependency('userdata');
 				let finished = false;
 				const finish = (note) => { if (finished) return; finished = true; self.__log('[loader] userdata: ' + note); self.__logFlush(); removeRunDependency('userdata'); };
-				setTimeout(() => finish('timed out'), 8000);
+				let timer = setTimeout(() => finish('timed out'), 8000);
 				const have = {};		// path -> mtime of each file restored from IndexedDB
 				// serve_local.py keeps every save in save-backups/live/. Its newest copy of a file goes in when IndexedDB has an older one (a failed write), or has no
 				// file of that name and no savegame at all (a new browser profile, an incognito window, cleared site data); a save deleted in the game stays deleted.
 				// io_worker.js stores what came in, so IndexedDB is whole again for the next start.
 				const fromDisk = async (note) => {
-					let n = 0;
+					if (finished) return;
+					clearTimeout(timer);
+					timer = setTimeout(() => finish(note + ', then timed out on save-backups/live'), 8000);
 					try {
 						const res = await fetch('/userdata');
 						if (!res.ok) throw new Error('HTTP ' + res.status);
 						const noSave = !Object.keys(have).some((p) => /\/SGTA5\d{4}$/.test(p));
+						const wanted = [];
 						for (const [name, mtime] of Object.entries(await res.json())) {
 							const path = '/userdata/Documents/Rockstar Games/GTA V/' + (name === 'pc_settings.bin' ? '' : 'Default/') + name;
-							if (!(path in have ? Math.round(have[path]) < mtime : noSave)) continue;
-							const file = await fetch('/userdata?name=' + name + '&mtime=' + mtime);
+							if (path in have ? Math.round(have[path]) < mtime : noSave) wanted.push({ name, path, mtime });
+						}
+						const files = await Promise.all(wanted.map(async ({ name, path, mtime }) => {
+							const file = await fetch('/userdata?name=' + encodeURIComponent(name) + '&mtime=' + mtime);
 							if (!file.ok) throw new Error(name + ' HTTP ' + file.status);
-							const data = new Uint8Array(await file.arrayBuffer());
+							return { path, data: new Uint8Array(await file.arrayBuffer()), mtime };
+						}));
+						// All or nothing: no await from here to finish(), so the timer cannot start main() between two files. A partial restore would reach
+						// IndexedDB, and with a savegame there the next start would not restore the rest.
+						if (finished) return;
+						for (const { path, data, mtime } of files) {
 							FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
 							FS.writeFile(path, data);
 							FS.utime(path, mtime, mtime);
-							io.postMessage({ userdata: { path, data, mtime }, restored: true });
-							n++;
 						}
-						finish(note + ', ' + n + ' from save-backups/live');
-					} catch (e) { finish(note + ', ' + n + ' from save-backups/live, then failed: ' + e); }
+						for (const userdata of files) io.postMessage({ userdata, restored: true });
+						finish(note + ', ' + files.length + ' from save-backups/live');
+					} catch (e) { finish(note + ', 0 from save-backups/live, then failed: ' + e); }
 				};
 				try {
 					const r = indexedDB.open('gta5-userdata', 1);
