@@ -59,6 +59,9 @@ Each photo you save to the phone gallery, in Story or Sandbox, is also saved as 
 ### Script camera (Paparazzo)
 In Paparazzo's film camera mission the mouse did not turn the camera. With keyboard and mouse that camera reads only `INPUT_SCALED_LOOK_LR`/`UD`, and the control data (`data/common/data/control/settings.meta`) has no axis for them, so they stayed 0. `patch_shop_menus.py` adds both axes, built from the same inputs as the normal look axes. `io_worker.js` reads only the size the manifest gives, so the file keeps its size, and it reads that file again at every start instead of an old stored copy.
 
+### Script debug text
+Some scripts draw debug text, such as a blue `runVendingMachine` near vending machines. The game's "Allow script debug draw" toggle starts on in this build. `patch_shop_menus.py` makes the 21 checks of that toggle read "off", so the script debug draw commands draw nothing.
+
 ### Money hotkey
 Press **`-`** (the key right of `0`) in game: the current character gets **+$999,999**. Once per press, in both Story Mode and Sandbox Mode. The game never sees that key.
 
@@ -78,7 +81,7 @@ Press **`-`** (the key right of `0`) in game: the current character gets **+$999
    - Windows: `runtime\python.exe patch_shop_menus.py`
    - macOS / Linux: `python3 patch_shop_menus.py`
 
-   It should print `game.wasm patched: 63201802 -> 63202110 bytes` and the cache size it chose for your RAM. The sha256 is `49c33612...` for 6 heaps, `7a6f1e4f...` for 7 and `9332b45b...` for 8. It also prints `pipelines.json: photo pipeline present (721 recipes)` and the same for `pipelines_low.json` (426). The last line is `settings.meta: scaled look axes present (script cameras)`. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
+   It should print `game.wasm patched: 63201802 -> 63202110 bytes` and the cache size it chose for your RAM. The sha256 is `de8cff6b...` for 6 heaps, `b32c1fc8...` for 7 and `45e971da...` for 8. It also prints `pipelines.json: photo pipeline present (721 recipes)` and the same for `pipelines_low.json` (426). If your mirror has no `shaders/pipelines.json`, it says so and goes on; the game runs without that file. The last line is `settings.meta: scaled look axes present (script cameras)`. The first run keeps the untouched file as `game.wasm.orig`. Running it again is safe. It refuses to touch a `game.wasm` that is not the expected build, so nothing breaks if your mirror is different.
 
    To undo: copy `game.wasm.orig` over `game.wasm` (in `mirror/playgta5.com/b/8b0b5899ed/`). For the camera fix, copy `settings.meta.orig` over `settings.meta` (in `mirror/playgta5.com/data/common/data/control/`).
 

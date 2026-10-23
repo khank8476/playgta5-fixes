@@ -44,6 +44,10 @@ turn. The script adds both axes, built from the same halves as INPUT_LOOK_LR/UD,
 io_worker.js reads only the manifest size of the file, so it keeps its size: its CRLF line ends become LF and spaces fill
 the end. The untouched file is kept as settings.meta.orig.
 
+Also a debug text fix. The "Allow script debug draw" toggle starts on in this build, so scripts draw their debug text,
+such as the blue "runVendingMachine" near vending machines. Only the script debug draw commands read it, in 21 checks of
+the form i64.const 6643884; i32.load8_u; i32.const 1; i32.ne; br_if 0. Each load becomes i32.const 0 and nops.
+
 Reads b/8b0b5899ed/game.wasm.orig (the untouched backup) and writes b/8b0b5899ed/game.wasm.
 On the first run game.wasm is the untouched file: it is checked and copied to game.wasm.orig first.
 Restore: cp game.wasm.orig game.wasm
@@ -99,6 +103,9 @@ LOG_SWAP_FAILURE = (8040, 0x48be2e)  # rage::netLogImpl::HandleBufferSwapFailure
 SPOOL_THREAD_ID = 6630952        # rage::LogSpoolFunction's thread id; CNetwork::Shutdown sets it to -1 after the thread exits
 FLUSH_WAIT_LOOP = bytes.fromhex('2000 4208 7c 2102 0340')  # local.get 0; i64.const 8; i64.add; local.set 2; loop
 SWAP_WAIT_LOOP = bytes.fromhex('0440 0340')  # if (pending) loop: the wait inside the swap retry loop (the only if-loop there)
+
+DEBUG_DRAW_CHECK = bytes.fromhex('42acc19503 2d0000 4101 47 0d00')  # i64.const 6643884; i32.load8_u; i32.const 1; i32.ne; br_if 0
+DEBUG_DRAW_OFF = bytes.fromhex('4100 010101010101')  # i32.const 0; 6 nops
 
 
 def asm(text):
@@ -306,12 +313,17 @@ def patch(data, heaps):
 
     payload = enc_leb(count) + b''.join(enc_leb(len(b)) + b for b in bodies)
     section = bytes([10]) + enc_leb(len(payload)) + payload
-    return data[:section_start] + section + data[section_end:]
+    data = data[:section_start] + section + data[section_end:]
+    check(data.count(DEBUG_DRAW_CHECK) == 21, 'script debug draw checks')
+    return data.replace(DEBUG_DRAW_CHECK, DEBUG_DRAW_OFF + DEBUG_DRAW_CHECK[len(DEBUG_DRAW_OFF):])
 
 
 def add_photo_pipeline():
     for name in ('pipelines.json', 'pipelines_low.json'):
         path = DIR / 'shaders' / name
+        if not path.exists():
+            print(f'{name}: not in your mirror, photo pipeline not added (the game runs without it)')
+            continue
         recipes = json.loads(path.read_text())
         if PHOTO_PIPELINE not in recipes:
             recipes.append(PHOTO_PIPELINE)
