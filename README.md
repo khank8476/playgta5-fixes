@@ -4,6 +4,8 @@
 
 New fixes go to V1 and V2; only V2 is tested.
 
+This project never posts a fix as a command for you to paste into a terminal. If an issue or comment asks you to do that, do not run it; report the comment to GitHub.
+
 > **These fixes are for V1** (game build `8b0b5899ed`). V2 is a new build, and its files do not work with these fixes. For V2, see [Grand-V-but-clean](https://github.com/waste-mgmt-consultant/Grand-V-but-clean), a fork of [SebasKitten/Grand-V](https://github.com/SebasKitten/Grand-V) that already has the memory fixes below. The patch script checks the game file first and changes nothing if it is not V1.
 
 The playgta5.com web client, scraped before the site went down, plus fixes for the problems that made it hard to actually play:
