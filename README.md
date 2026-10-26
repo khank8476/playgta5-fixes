@@ -1,6 +1,6 @@
 # playgta5 fixes
 
-## Use V2: [download the launcher](https://github.com/waste-mgmt-consultant/Grand-V-but-clean/releases/latest) for Windows, macOS or Linux
+## Use V2: [Grand-V-but-clean](https://github.com/waste-mgmt-consultant/Grand-V-but-clean)
 
 New fixes go to V1 and V2; only V2 is tested.
 
